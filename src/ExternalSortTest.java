@@ -66,4 +66,14 @@ public class ExternalSortTest extends TestCase
     {
         sortHelper(1);
     }
+    /**
+     * Test a file with 5 block
+     * @throws Exception
+     */
+    public void test5()
+        throws Exception
+    {
+        sortHelper(5);
+    }
+    
 }
