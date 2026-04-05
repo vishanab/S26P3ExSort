@@ -28,21 +28,23 @@ public class Heap {
 
     }
 
-    public void swapDown(
-        int root,
-        int heapSize) {
+    public void swapDown(int root, int heapSize) {
         while (true) {
             int largest = root;
-            int left = 2 * root + 1;
-            int right = 2 * root + 2;
-
-            if (left < heapSize && key(left) > key(largest)) {
+            int left    = 2 * root + 1;
+            int right   = 2 * root + 2;
+ 
+            if (left < heapSize
+                    && Integer.compareUnsigned(key(left),
+                                               key(largest)) > 0) {
                 largest = left;
             }
-            if (right < heapSize && key(right) > key(largest)) {
+            if (right < heapSize
+                    && Integer.compareUnsigned(key(right),
+                                               key(largest)) > 0) {
                 largest = right;
             }
-
+ 
             if (largest != root) {
                 swap(root, largest);
                 root = largest;
@@ -57,12 +59,11 @@ public class Heap {
     private void swap(int i, int j) {
         int posI = i * RECORD_SIZE;
         int posJ = j * RECORD_SIZE;
-
+ 
         long recordI = bb.getLong(posI);
         bb.putLong(posI, bb.getLong(posJ));
         bb.putLong(posJ, recordI);
     }
-
 
     // Read the key of a record
     private int key(int recordIndex) {
