@@ -1,7 +1,6 @@
 import java.nio.*;
 import java.io.*;
 
-
 // The External Sort implementation
 // -------------------------------------------------------------------------
 /**
@@ -25,282 +24,339 @@ public class ExternalSort {
     private static final int OUT_BUF_BLOCKS = 1;
     private static final int OUT_BUF_BYTES = OUT_BUF_BLOCKS * BLOCK_SIZE;
     private static final int MAX_WAYS = (MEMBYTES - OUT_BUF_BYTES) / BLOCK_SIZE;
-    
+
+    private static int runCount;
+
     /**
      * Create a new ExternalSort object.
      * 
-     * @param theFileName
+     * @param fileName
      *            The name of the file to be sorted
      *
      * @throws IOException
      */
-//    public static void sort(String theFileName) throws IOException {
-//        RandomAccessFile theFile = new RandomAccessFile(theFileName, "rw");
-//
-//        byte[] workingMem = new byte[MEMBYTES];
-//
-//        // read in stuff
-//        long fileLength = theFile.length();
-//        int bytesToRead = (int)Math.min(fileLength, MEMBYTES);
-//        bytesToRead = (bytesToRead / RECORD_SIZE) * RECORD_SIZE;
-//
-//        if (bytesToRead > 0) {
-//            theFile.seek(0);
-//            theFile.readFully(workingMem, 0, bytesToRead);
-//
-//            ByteBuffer bb = ByteBuffer.wrap(workingMem);
-//
-//            int numRecords = bytesToRead / RECORD_SIZE;
-//            // heapsort
-//            Heap heap = new Heap(bb, numRecords);
-//            heap.heapSort();
-//            // write back to file
-//            theFile.seek(0);
-//            theFile.write(workingMem, 0, bytesToRead);
-//            theFile.close();
-//        }
-//    }
-        private static int runCount;
-    
-        public static void sort(String fileName) throws IOException {
-            byte[] pool = new byte[MEMBYTES];
-            String temp = fileName + ".tmp";
-    
-            long[][] runs = generateRuns(fileName, temp, pool);
-    
-            mergeAllRuns(fileName, temp, runs, pool);
-    
-            new java.io.File(temp).delete();
-        }
-        private static long[][] generateRuns(
-            String input, String temp, byte[] pool) throws IOException {
+    public static void sort(String fileName) throws IOException {
+        byte[] pool = new byte[MEMBYTES];
+        String temp = fileName + ".tmp";
 
-            long[][] runs = new long[10000][2];
-            runCount = 0;
+        long[][] runs = generateRuns(fileName, temp, pool);
 
-            try (RandomAccessFile in = new RandomAccessFile(input, "r");
-                 RandomAccessFile out = new RandomAccessFile(temp, "rw")) {
+        mergeAllRuns(fileName, temp, runs, pool);
 
-                out.setLength(0);
-                long fileLen = in.length();
-                long filePos = 0;
-                long outPos = 0;
+        new java.io.File(temp).delete();
+    }
 
-                while (filePos < fileLen) {
-                    long remaining = fileLen - filePos;
-                    int toRead = (int)Math.min(remaining, HEAP_BYTES);
-                    toRead = (toRead / RECORD_SIZE) * RECORD_SIZE;
-                    if (toRead == 0) break;
 
-                    in.seek(filePos);
-                    in.readFully(pool, 0, toRead);
-                    filePos += toRead;
+    /**
+     * Reads parts of the input file that fit into memory, sorts them,
+     * and writes them as sorted runs to a temporary file.
+     *
+     * @param input
+     *            the input file name
+     * @param temp
+     *            the temporary file name
+     * @param pool
+     *            the shared memory buffer
+     * @return array describing runs (start position and length)
+     * @throws IOException
+     *             if file I/O fails
+     */
+    private static long[][] generateRuns(String input, String temp, byte[] pool)
+        throws IOException {
 
-                    int numRecords = toRead / RECORD_SIZE;
+        long[][] runs = new long[10000][2];
+        runCount = 0;
 
-                    ByteBuffer view = ByteBuffer.wrap(pool, 0, toRead);
-                    Heap heap = new Heap(view, numRecords);
-                    heap.heapSort();
+        try (RandomAccessFile in = new RandomAccessFile(input, "r");
+            RandomAccessFile out = new RandomAccessFile(temp, "rw")) {
 
-                    long runStart = outPos;
-                    int written = 0;
+            out.setLength(0);
+            long fileLen = in.length();
+            long filePos = 0;
+            long outPos = 0;
 
-                    while (written < toRead) {
-                        int block = Math.min(OUT_BUF_BYTES, toRead - written);
-                        out.seek(outPos);
-                        out.write(pool, written, block);
-                        outPos += block;
-                        written += block;
-                    }
+            while (filePos < fileLen) {
+                long remaining = fileLen - filePos;
+                int toRead = (int)Math.min(remaining, HEAP_BYTES);
+                toRead = (toRead / RECORD_SIZE) * RECORD_SIZE;
+                if (toRead == 0)
+                    break;
 
-                    runs[runCount][0] = runStart;
-                    runs[runCount][1] = toRead;
-                    runCount++;
-                }
-            }
-            return runs;
-        }
- 
+                in.seek(filePos);
+                in.readFully(pool, 0, toRead);
+                filePos += toRead;
 
-        private static void mergeAllRuns(
-            String orig, String temp, long[][] runs, byte[] pool)
-            throws IOException {
+                int numRecords = toRead / RECORD_SIZE;
 
-            String srcName = temp;
-            String dstName = orig;
+                ByteBuffer view = ByteBuffer.wrap(pool, 0, toRead);
+                Heap heap = new Heap(view, numRecords);
+                heap.heapSort();
 
-            while (runCount > 1) {
-                long[][] nextRuns = new long[10000][2];
-                int nextCount = 0;
+                long runStart = outPos;
+                int written = 0;
 
-                try (RandomAccessFile src = new RandomAccessFile(srcName, "r");
-                     RandomAccessFile dst = new RandomAccessFile(dstName, "rw")) {
-
-                    dst.setLength(0);
-                    long dstPos = 0;
-
-                    int i = 0;
-                    while (i < runCount) {
-                        int ways = Math.min(MAX_WAYS, runCount - i);
-                        long[] desc = new long[ways * 2];
-
-                        for (int k = 0; k < ways; k++) {
-                            desc[k * 2] = runs[i + k][0];
-                            desc[k * 2 + 1] = runs[i + k][1];
-                        }
-
-                        long merged = mergeRuns(src, dst, dstPos,
-                            desc, ways, pool);
-
-                        nextRuns[nextCount][0] = dstPos;
-                        nextRuns[nextCount][1] = merged;
-                        nextCount++;
-
-                        dstPos += merged;
-                        i += ways;
-                    }
+                while (written < toRead) {
+                    int block = Math.min(OUT_BUF_BYTES, toRead - written);
+                    out.seek(outPos);
+                    out.write(pool, written, block);
+                    outPos += block;
+                    written += block;
                 }
 
-                runs = nextRuns;
-                runCount = nextCount;
-
-                String tmp = srcName;
-                srcName = dstName;
-                dstName = tmp;
-            }
-
-            if (srcName.equals(temp)) {
-                copyFile(temp, orig, pool);
+                runs[runCount][0] = runStart;
+                runs[runCount][1] = toRead;
+                runCount++;
             }
         }
-        
-        private static long mergeRuns(
-            RandomAccessFile src,
-            RandomAccessFile dst,
-            long dstStart,
-            long[] runDesc,
-            int ways,
-            byte[] pool) throws IOException {
+        return runs;
+    }
 
-            long[] runPos = new long[ways];
-            long[] runEnd = new long[ways];
-            int[] bufOffset = new int[ways];
-            int[] bufFilled = new int[ways];
-            int[] bufIndex = new int[ways];
+
+    /**
+     * Repeatedly merges runs until only one sorted run is left.
+     *
+     * @param orig
+     *            the original file (final output)
+     * @param temp
+     *            the temporary file
+     * @param runs
+     *            run metadata (start, length)
+     * @param pool
+     *            shared memory buffer
+     * @throws IOException
+     *             if file I/O fails
+     */
+    private static void mergeAllRuns(
+        String orig,
+        String temp,
+        long[][] runs,
+        byte[] pool)
+        throws IOException {
+
+        String srcName = temp;
+        String dstName = orig;
+
+        while (runCount > 1) {
+            long[][] nextRuns = new long[10000][2];
+            int nextCount = 0;
+
+            try (RandomAccessFile src = new RandomAccessFile(srcName, "r");
+                RandomAccessFile dst = new RandomAccessFile(dstName, "rw")) {
+
+                dst.setLength(0);
+                long dstPos = 0;
+
+                int i = 0;
+                while (i < runCount) {
+                    int ways = Math.min(MAX_WAYS, runCount - i);
+                    long[] desc = new long[ways * 2];
+
+                    for (int k = 0; k < ways; k++) {
+                        desc[k * 2] = runs[i + k][0];
+                        desc[k * 2 + 1] = runs[i + k][1];
+                    }
+
+                    long merged = mergeRuns(src, dst, dstPos, desc, ways, pool);
+
+                    nextRuns[nextCount][0] = dstPos;
+                    nextRuns[nextCount][1] = merged;
+                    nextCount++;
+
+                    dstPos += merged;
+                    i += ways;
+                }
+            }
+
+            runs = nextRuns;
+            runCount = nextCount;
+
+            String tmp = srcName;
+            srcName = dstName;
+            dstName = tmp;
+        }
+
+        if (srcName.equals(temp)) {
+            copyFile(temp, orig, pool);
+        }
+    }
+
+
+    /**
+     * Merges multiple sorted runs into a single run using k-way merge.
+     *
+     * @param src
+     *            source file containing runs
+     * @param dst
+     *            destination file
+     * @param dstStart
+     *            starting position in destination
+     * @param runDesc
+     *            run metadata (start, length pairs)
+     * @param ways
+     *            number of runs being merged
+     * @param pool
+     *            shared memory buffer
+     * @return number of bytes written
+     * @throws IOException
+     *             if file I/O fails
+     */
+    private static long mergeRuns(
+        RandomAccessFile src,
+        RandomAccessFile dst,
+        long dstStart,
+        long[] runDesc,
+        int ways,
+        byte[] pool)
+        throws IOException {
+
+        long[] runPos = new long[ways];
+        long[] runEnd = new long[ways];
+        int[] bufOffset = new int[ways];
+        int[] bufFilled = new int[ways];
+        int[] bufIndex = new int[ways];
+
+        for (int k = 0; k < ways; k++) {
+            runPos[k] = runDesc[k * 2];
+            runEnd[k] = runDesc[k * 2] + runDesc[k * 2 + 1];
+            bufOffset[k] = k * BLOCK_SIZE;
+
+            loadBlock(src, pool, bufOffset[k], runPos[k], runEnd[k]);
+            int loaded = (int)Math.min(BLOCK_SIZE, runEnd[k] - runPos[k]);
+
+            bufFilled[k] = loaded;
+            bufIndex[k] = 0;
+            runPos[k] += loaded;
+        }
+
+        int outOffset = ways * BLOCK_SIZE;
+        int outUsed = 0;
+        long total = 0;
+
+        ByteBuffer view = ByteBuffer.wrap(pool);
+
+        while (true) {
+            int minRun = -1;
+            int minKey = 0;
 
             for (int k = 0; k < ways; k++) {
-                runPos[k] = runDesc[k * 2];
-                runEnd[k] = runDesc[k * 2] + runDesc[k * 2 + 1];
-                bufOffset[k] = k * BLOCK_SIZE;
+                if (bufIndex[k] * RECORD_SIZE >= bufFilled[k]) {
+                    if (runPos[k] < runEnd[k]) {
+                        loadBlock(src, pool, bufOffset[k], runPos[k],
+                            runEnd[k]);
 
-                loadBlock(src, pool, bufOffset[k], runPos[k], runEnd[k]);
-                int loaded = (int)Math.min(BLOCK_SIZE, runEnd[k] - runPos[k]);
+                        int loaded = (int)Math.min(BLOCK_SIZE, runEnd[k]
+                            - runPos[k]);
 
-                bufFilled[k] = loaded;
-                bufIndex[k] = 0;
-                runPos[k] += loaded;
-            }
-
-            int outOffset = ways * BLOCK_SIZE;
-            int outUsed = 0;
-            long total = 0;
-
-            ByteBuffer view = ByteBuffer.wrap(pool);
-
-            while (true) {
-                int minRun = -1;
-                int minKey = 0;
-
-                for (int k = 0; k < ways; k++) {
-                    if (bufIndex[k] * RECORD_SIZE >= bufFilled[k]) {
-                        if (runPos[k] < runEnd[k]) {
-                            loadBlock(src, pool, bufOffset[k],
-                                runPos[k], runEnd[k]);
-
-                            int loaded = (int)Math.min(
-                                BLOCK_SIZE, runEnd[k] - runPos[k]);
-
-                            bufFilled[k] = loaded;
-                            bufIndex[k] = 0;
-                            runPos[k] += loaded;
-                        }
-                        else continue;
+                        bufFilled[k] = loaded;
+                        bufIndex[k] = 0;
+                        runPos[k] += loaded;
                     }
-
-                    int keyPos = bufOffset[k] + bufIndex[k] * RECORD_SIZE;
-                    int key = view.getInt(keyPos);
-
-                    if (minRun == -1 ||
-                        Integer.compareUnsigned(key, minKey) < 0) {
-                        minKey = key;
-                        minRun = k;
-                    }
+                    else
+                        continue;
                 }
 
-                if (minRun == -1) break;
+                int keyPos = bufOffset[k] + bufIndex[k] * RECORD_SIZE;
+                int key = view.getInt(keyPos);
 
-                int srcPos = bufOffset[minRun] +
-                    bufIndex[minRun] * RECORD_SIZE;
-
-                System.arraycopy(pool, srcPos,
-                    pool, outOffset + outUsed, RECORD_SIZE);
-
-                bufIndex[minRun]++;
-                outUsed += RECORD_SIZE;
-
-                if (outUsed >= OUT_BUF_BYTES) {
-                    dst.seek(dstStart + total);
-                    dst.write(pool, outOffset, outUsed);
-                    total += outUsed;
-                    outUsed = 0;
+                if (minRun == -1 || Integer.compareUnsigned(key, minKey) < 0) {
+                    minKey = key;
+                    minRun = k;
                 }
             }
 
-            if (outUsed > 0) {
+            if (minRun == -1)
+                break;
+
+            int srcPos = bufOffset[minRun] + bufIndex[minRun] * RECORD_SIZE;
+
+            System.arraycopy(pool, srcPos, pool, outOffset + outUsed,
+                RECORD_SIZE);
+
+            bufIndex[minRun]++;
+            outUsed += RECORD_SIZE;
+
+            if (outUsed >= OUT_BUF_BYTES) {
                 dst.seek(dstStart + total);
                 dst.write(pool, outOffset, outUsed);
                 total += outUsed;
-            }
-
-            return total;
-        }
-
-        private static void loadBlock(
-            RandomAccessFile src,
-            byte[] pool,
-            int offset,
-            long pos,
-            long end) throws IOException {
-
-            int toRead = (int)Math.min(BLOCK_SIZE, end - pos);
-            if (toRead <= 0) return;
-
-            src.seek(pos);
-            src.readFully(pool, offset, toRead);
-        }
-
-        private static void copyFile(
-            String srcPath,
-            String dstPath,
-            byte[] pool) throws IOException {
-
-            try (RandomAccessFile src = new RandomAccessFile(srcPath, "r");
-                 RandomAccessFile dst = new RandomAccessFile(dstPath, "rw")) {
-
-                dst.setLength(0);
-                long pos = 0;
-                long len = src.length();
-
-                while (pos < len) {
-                    int toRead = (int)Math.min(pool.length, len - pos);
-                    src.seek(pos);
-                    src.readFully(pool, 0, toRead);
-                    dst.seek(pos);
-                    dst.write(pool, 0, toRead);
-                    pos += toRead;
-                }
+                outUsed = 0;
             }
         }
 
+        if (outUsed > 0) {
+            dst.seek(dstStart + total);
+            dst.write(pool, outOffset, outUsed);
+            total += outUsed;
+        }
+
+        return total;
+    }
+
+
+    /**
+     * Loads a block of data from a run into the buffer.
+     *
+     * @param src
+     *            source file
+     * @param pool
+     *            shared memory buffer
+     * @param offset
+     *            buffer offset
+     * @param pos
+     *            current position in run
+     * @param end
+     *            end position of run
+     * @throws IOException
+     *             if file I/O fails
+     */
+    private static void loadBlock(
+        RandomAccessFile src,
+        byte[] pool,
+        int offset,
+        long pos,
+        long end)
+        throws IOException {
+
+        int toRead = (int)Math.min(BLOCK_SIZE, end - pos);
+        if (toRead <= 0)
+            return;
+
+        src.seek(pos);
+        src.readFully(pool, offset, toRead);
+    }
+
+
+    /**
+     * Copies one file to another using buffer.
+     *
+     * @param srcPath
+     *            source file path
+     * @param dstPath
+     *            destination file path
+     * @param pool
+     *            shared memory buffer
+     * @throws IOException
+     *             if file I/O fails
+     */
+    private static void copyFile(String srcPath, String dstPath, byte[] pool)
+        throws IOException {
+
+        try (RandomAccessFile src = new RandomAccessFile(srcPath, "r");
+            RandomAccessFile dst = new RandomAccessFile(dstPath, "rw")) {
+
+            dst.setLength(0);
+            long pos = 0;
+            long len = src.length();
+
+            while (pos < len) {
+                int toRead = (int)Math.min(pool.length, len - pos);
+                src.seek(pos);
+                src.readFully(pool, 0, toRead);
+                dst.seek(pos);
+                dst.write(pool, 0, toRead);
+                pos += toRead;
+            }
+        }
+    }
 
 }
